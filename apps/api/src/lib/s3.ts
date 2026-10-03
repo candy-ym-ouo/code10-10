@@ -69,6 +69,20 @@ export async function createPlaybackUrl(objectKey: string, originalName: string,
   );
 }
 
+export async function createExportDownloadUrl(objectKey: string, fileName: string, contentType?: string): Promise<string> {
+  const config = getConfig();
+  return getSignedUrl(
+    getPublicS3(),
+    new GetObjectCommand({
+      Bucket: config.S3_BUCKET,
+      Key: objectKey,
+      ResponseContentDisposition: `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+      ...(contentType ? { ResponseContentType: contentType } : {}),
+    }),
+    { expiresIn: config.PLAYBACK_URL_TTL_SECONDS },
+  );
+}
+
 export async function verifyObject(objectKey: string, expectedSize: bigint, expectedSha256: string): Promise<void> {
   const config = getConfig();
   let head;

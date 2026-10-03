@@ -7,9 +7,10 @@ import { Worker } from "bullmq";
 import { Redis } from "ioredis";
 import { getConfig } from "./config/env.js";
 import { prisma } from "./lib/prisma.js";
-import { deleteObject, getObjectStream, putObject } from "./lib/s3.js";
+import { deleteObject, getObjectStream } from "./lib/s3.js";
 import { generatePeaks, probeAudio } from "./lib/media.js";
-import { buildUserExport } from "./lib/export.js";
+import { processAccountDeletion } from "./processors/account-processor.js";
+import { processExport, sweepExports } from "./processors/export-processor.js";
 
 const config = getConfig();
 const redis = new Redis(config.REDIS_URL, { maxRetriesPerRequest: null });
@@ -96,20 +97,12 @@ async function cleanupSession(sessionId: string) {
 }
 
 async function exportData(exportId: string) {
-  const task = await prisma.dataExport.findUnique({ where: { id: exportId } });
-  if (!task || !task.objectKey) return;
-  await prisma.dataExport.update({ where: { id: exportId }, data: { status: "PROCESSING" } });
-  try {
-    const output = await buildUserExport(task.userId, task.format);
-    await putObject(task.objectKey, output.body, output.contentType);
-    await prisma.dataExport.update({ where: { id: exportId }, data: { status: "READY", failure: null } });
-  } catch (error) {
-    await prisma.dataExport.update({
-      where: { id: exportId },
-      data: { status: "FAILED", failure: error instanceof Error ? error.message.slice(0, 500) : "EXPORT_FAILED" },
-    });
-    throw error;
-  }
+  await processExport(exportId);
+}
+
+async function deleteUserAccount(userId: string) {
+  const result = await processAccountDeletion(userId);
+  log("info", { userId, ...result }, "account deletion completed");
 }
 
 async function scanOverdueGoals() {
@@ -131,6 +124,7 @@ const worker = new Worker(
     if (job.name === "probe-media") return processMedia(String(job.data.mediaId));
     if (job.name === "cleanup-session") return cleanupSession(String(job.data.sessionId));
     if (job.name === "export-data") return exportData(String(job.data.exportId));
+    if (job.name === "delete-user") return deleteUserAccount(String(job.data.userId));
     throw new Error(`Unknown job: ${job.name}`);
   },
   { connection: redis, concurrency: config.WORKER_CONCURRENCY },
@@ -148,10 +142,24 @@ const overdueInterval = setInterval(() => {
   void scanOverdueGoals().catch((error) => log("error", { err: error instanceof Error ? error.message : String(error) }, "overdue scan failed"));
 }, 24 * 60 * 60_000);
 
+async function runExportSweep() {
+  try {
+    const result = await sweepExports();
+    if (result.expired > 0 || result.deleted > 0 || result.recovered > 0) log("info", result, "export sweep completed");
+  } catch (error) {
+    log("error", { err: error instanceof Error ? error.message : String(error) }, "export sweep failed");
+  }
+}
+await runExportSweep();
+const exportSweepInterval = setInterval(() => {
+  void runExportSweep();
+}, config.EXPORT_SWEEP_INTERVAL_SECONDS * 1000);
+
 async function shutdown(signal: string) {
   log("info", { signal }, "shutting down worker");
   clearInterval(heartbeat);
   clearInterval(overdueInterval);
+  clearInterval(exportSweepInterval);
   await worker.close();
   await redis.quit();
   await prisma.$disconnect();

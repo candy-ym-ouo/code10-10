@@ -124,8 +124,13 @@ Refresh Cookie 路径为 `/api/v1/auth`，生产环境在 HTTPS 下自动使用 
 | GET | `/statistics/goals` | 目标完成率和逾期 |
 | GET | `/statistics/instruments` | 各乐器聚合 |
 | GET | `/statistics/dashboard` | 首页聚合 |
-| POST | `/exports` | 创建 JSON/CSV 用户数据导出 |
+| POST | `/exports` | 创建 JSON/CSV 用户数据导出（分批异步、可断点续跑） |
+| GET | `/exports` | 查询最近的导出任务列表与进度 |
 | GET | `/exports/:id` | 查询导出状态和短时下载地址 |
+| POST | `/exports/:id/cancel` | 取消排队中或处理中的导出任务 |
+| DELETE | `/users/me` | 校验密码后删除账号，后台清理全部文件与数据 |
+
+导出任务在后台按练习分批处理，处理中断会从最近检查点续跑；同一用户重复提交相同参数（`format`/`from`/`to`）时直接复用活动任务，不生成重复文件。任务可在批次边界取消（`CANCELLED`），已完成文件保留 24 小时，到期由 Worker 删除对象并标记 `EXPIRED`；下载链接为预签名短链接。账号删除进入 `DELETING`，后台清空 `users/{id}/` 前缀对象后级联删除数据库行，此前签发的链接立即失效。
 
 统计接口必须传 `from`、`to` 和 IANA `timezone`。
 

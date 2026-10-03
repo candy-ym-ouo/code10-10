@@ -1,9 +1,10 @@
 import type { FastifyPluginAsync } from "fastify";
-import { changePasswordSchema, updateProfileSchema } from "@practice/contracts";
+import { changePasswordSchema, deleteAccountSchema, updateProfileSchema } from "@practice/contracts";
 import { parseOrThrow, isIanaTimezone } from "../lib/validation.js";
 import { AppError } from "../lib/errors.js";
 import { hashPassword, verifyPassword } from "../lib/security.js";
 import { prisma } from "../lib/prisma.js";
+import { enqueueAccountDeletion } from "../lib/queue.js";
 import { audit } from "../lib/audit.js";
 
 const selectUser = {
@@ -57,6 +58,23 @@ const userRoutes: FastifyPluginAsync = async (app) => {
     ]);
     await audit(request, "USER_PASSWORD_CHANGED", "USER", user.id, "SUCCESS");
     return { success: true, message: "密码已更新，请重新登录" };
+  });
+
+  // 删除账号：校验密码后进入 DELETING，后台清理全部对象存储文件与数据库行。
+  // 删除后所有预签名链接立即失效（对象被删除），残留会话也无法再换取令牌。
+  app.delete("/me", async (request, reply) => {
+    const input = parseOrThrow(deleteAccountSchema, request.body);
+    const user = await prisma.user.findUnique({ where: { id: request.authUser!.id } });
+    if (!user || !(await verifyPassword(user.passwordHash, input.password))) {
+      throw new AppError(400, "CURRENT_PASSWORD_INVALID", "当前密码不正确，无法删除账号");
+    }
+    await prisma.$transaction([
+      prisma.user.update({ where: { id: user.id }, data: { status: "DELETING" } }),
+      prisma.refreshSession.updateMany({ where: { userId: user.id, revokedAt: null }, data: { revokedAt: new Date() } }),
+    ]);
+    await enqueueAccountDeletion(user.id);
+    await audit(request, "USER_ACCOUNT_DELETE_REQUESTED", "USER", user.id, "SUCCESS");
+    return reply.status(202).send({ success: true, status: "DELETING" });
   });
 };
 

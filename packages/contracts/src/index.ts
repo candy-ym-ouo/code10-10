@@ -38,6 +38,7 @@ export const METRIC_TYPES = [
 ] as const;
 export const EVIDENCE_REQUIREMENTS = ["NONE", "AUDIO", "SELF_REVIEW", "AUDIO_AND_SELF_REVIEW"] as const;
 export const GOAL_STATUSES = ["OPEN", "IN_PROGRESS", "ACHIEVED", "MISSED", "CANCELLED"] as const;
+export const EXPORT_STATUSES = ["PENDING", "PROCESSING", "READY", "FAILED", "EXPIRED", "CANCELLED"] as const;
 
 const requiredText = (label: string, max: number) =>
   z.string().trim().min(1, `${label}不能为空`).max(max, `${label}不能超过 ${max} 个字符`);
@@ -195,10 +196,21 @@ export const statisticsRangeSchema = z.object({
   instrument: z.string().trim().max(60).optional(),
 });
 
-export const createExportSchema = z.object({
-  format: z.enum(["json", "csv"]).default("json"),
-  from: z.coerce.date().optional(),
-  to: z.coerce.date().optional(),
+export const createExportSchema = z
+  .object({
+    format: z.enum(["json", "csv"]).default("json"),
+    from: z.coerce.date().optional(),
+    to: z.coerce.date().optional(),
+  })
+  .refine((value) => !value.from || !value.to || value.to.getTime() > value.from.getTime(), {
+    path: ["to"],
+    message: "结束时间必须晚于开始时间",
+  });
+export const exportListQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(50).default(10),
+});
+export const deleteAccountSchema = z.object({
+  password: z.string().min(1).max(128),
 });
 
 export const idSchema = z.string().uuid();
@@ -209,6 +221,7 @@ export type AnnotationType = (typeof ANNOTATION_TYPES)[number];
 export type GoalCategory = (typeof GOAL_CATEGORIES)[number];
 export type MetricType = (typeof METRIC_TYPES)[number];
 export type GoalStatus = (typeof GOAL_STATUSES)[number];
+export type ExportStatus = (typeof EXPORT_STATUSES)[number];
 export type EvidenceRequirement = (typeof EVIDENCE_REQUIREMENTS)[number];
 
 export interface ApiErrorBody {
@@ -261,8 +274,7 @@ export function calculateSessionDuration(mediaDurationsMs: Array<number | null |
   return mediaDurationsMs.reduce<number>((total, duration) => total + (duration && duration > 0 ? duration : 0), 0);
 }
 
-export function describeMissingReview(input: {
-  readyMediaCount: number;
+export function describeMissingReview(input: {  readyMediaCount: number;
   annotationCount: number;
   noIssues: boolean;
   nextFocus?: string | null;
@@ -279,4 +291,19 @@ export function describeMissingReview(input: {
     missing.push("已有未关闭目标时，本次至少记录一次目标进度");
   }
   return missing;
+}
+
+export interface ExportParamsInput {
+  format: "json" | "csv";
+  from?: Date | string | null;
+  to?: Date | string | null;
+}
+
+/**
+ * 导出请求参数的规范化字符串。同参数请求命中同一个活动任务，不生成副本。
+ * 时间统一按 UTC 毫秒存储，避免时区/序列化差异产生重复任务。
+ */
+export function canonicalExportParams(input: ExportParamsInput): string {
+  const at = (value?: Date | string | null): string => (value == null || value === "" ? "" : String(new Date(value).getTime()));
+  return [`format=${input.format}`, `from=${at(input.from)}`, `to=${at(input.to)}`].join("&");
 }

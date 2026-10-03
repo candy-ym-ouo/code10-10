@@ -71,6 +71,7 @@ enum ExportStatus {
   READY
   FAILED
   EXPIRED
+  CANCELLED
 }
 
 enum GoalStatus {
@@ -279,18 +280,30 @@ model SessionReview {
 }
 
 model DataExport {
-  id         String        @id @default(uuid()) @db.Uuid
-  userId     String        @map("user_id") @db.Uuid
-  format     String        @db.VarChar(8)
-  status     ExportStatus  @default(PENDING)
-  objectKey  String?       @map("object_key") @db.Text
-  failure    String?       @db.VarChar(500)
-  expiresAt  DateTime?     @map("expires_at") @db.Timestamptz(6)
-  createdAt  DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt  DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
-  user       User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id             String       @id @default(uuid()) @db.Uuid
+  userId         String       @map("user_id") @db.Uuid
+  format         String       @db.VarChar(8)
+  status         ExportStatus @default(PENDING)
+  paramsHash     String       @map("params_hash") @db.Char(64)
+  objectKey      String?      @map("object_key") @db.Text
+  rangeFrom      DateTime?    @map("range_from") @db.Timestamptz(6)
+  rangeTo        DateTime?    @map("range_to") @db.Timestamptz(6)
+  totalSessions  Int          @default(0) @map("total_sessions")
+  cursorSessionId String?     @map("cursor_session_id") @db.Uuid
+  processedSessions Int       @default(0) @map("processed_sessions")
+  multipartUploadId String?   @map("multipart_upload_id") @db.VarChar(255)
+  uploadedParts  Json?        @map("uploaded_parts")
+  cancelRequestedAt DateTime? @map("cancel_requested_at") @db.Timestamptz(6)
+  bullJobId      String?      @map("bull_job_id") @db.VarChar(120)
+  failure        String?      @db.VarChar(500)
+  expiresAt      DateTime?    @map("expires_at") @db.Timestamptz(6)
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
 
+  @@index([userId, paramsHash], map: "data_exports_active_user_params_idx")
   @@index([userId, createdAt(sort: Desc)])
+  @@index([status, expiresAt])
   @@map("data_exports")
 }
 

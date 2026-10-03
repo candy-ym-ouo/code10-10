@@ -31,6 +31,7 @@ const envSchema = z.object({
   MAX_SESSION_TOTAL_MB: z.coerce.number().int().min(1).max(10_000).default(1024),
   UPLOAD_URL_TTL_SECONDS: z.coerce.number().int().min(60).max(3600).default(900),
   PLAYBACK_URL_TTL_SECONDS: z.coerce.number().int().min(60).max(3600).default(300),
+  EXPORT_FILE_TTL_HOURS: z.coerce.number().int().min(1).max(24 * 30).default(24),
   METRICS_ENABLED: booleanString,
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
 });

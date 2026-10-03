@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   calculateSessionDuration,
+  canonicalExportParams,
   canTransitionSession,
+  createExportSchema,
   describeMissingReview,
   isGoalProgressValid,
   validateAnnotationRange,
@@ -46,5 +48,30 @@ describe("goal values", () => {
 
   it("sums only valid media durations", () => {
     expect(calculateSessionDuration([1000, null, 2500, -1])).toBe(3500);
+  });
+});
+
+describe("export params fingerprint", () => {
+  it("is stable across equivalent representations", () => {
+    const date = new Date("2026-10-03T08:00:00.000Z");
+    expect(canonicalExportParams({ format: "json", from: date, to: undefined })).toBe(
+      canonicalExportParams({ format: "json", from: date.toISOString(), to: null }),
+    );
+  });
+
+  it("distinguishes different formats and ranges", () => {
+    expect(canonicalExportParams({ format: "json" })).not.toBe(canonicalExportParams({ format: "csv" }));
+    expect(canonicalExportParams({ format: "json", from: new Date(0) })).not.toBe(
+      canonicalExportParams({ format: "json", from: new Date(1) }),
+    );
+  });
+
+  it("rejects a range whose end precedes start", () => {
+    const result = createExportSchema.safeParse({
+      format: "json",
+      from: "2026-10-03T00:00:00Z",
+      to: "2026-10-02T00:00:00Z",
+    });
+    expect(result.success).toBe(false);
   });
 });
