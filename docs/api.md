@@ -33,6 +33,9 @@ Refresh Cookie 路径为 `/api/v1/auth`，生产环境在 HTTPS 下自动使用 
 | GET | `/users/me` | 当前用户 |
 | PATCH | `/users/me` | 更新展示名、默认乐器、时区和语言 |
 | POST | `/users/me/password` | 修改密码并撤销其他会话 |
+| POST | `/users/me/deletion` | 注销账号，后台删除全部数据与对象，下载链接立即失效 |
+
+注销请求需要当前密码与固定确认串 `DELETE-MY-ACCOUNT`。用户进入 `DELETING` 后所有 Token 立即失效，Worker 删除该用户对象存储前缀及全部业务数据；失败会重试，用户保持 `DELETING` 无法登录。
 
 ## 练习
 
@@ -124,10 +127,21 @@ Refresh Cookie 路径为 `/api/v1/auth`，生产环境在 HTTPS 下自动使用 
 | GET | `/statistics/goals` | 目标完成率和逾期 |
 | GET | `/statistics/instruments` | 各乐器聚合 |
 | GET | `/statistics/dashboard` | 首页聚合 |
-| POST | `/exports` | 创建 JSON/CSV 用户数据导出 |
-| GET | `/exports/:id` | 查询导出状态和短时下载地址 |
+| POST | `/exports` | 创建 JSON/CSV 用户数据导出（幂等） |
+| GET | `/exports` | 最近的导出任务列表 |
+| GET | `/exports/:id` | 查询导出状态、进度和短时下载地址 |
+| POST | `/exports/:id/cancel` | 取消排队或处理中的导出 |
 
 统计接口必须传 `from`、`to` 和 IANA `timezone`。
+
+### 数据导出语义
+
+- **异步分批**：任务进入 BullMQ 队列，Worker 按 `EXPORT_BATCH_SIZE`（默认 50）分批读取练习，任务字段返回 `totalSessions` 与 `processedCount` 进度。
+- **断点续跑**：每批先写检查点对象（`users/:id/exports/_checkpoints/`），再推进数据库游标；Worker 崩溃或任务重试后从最后一个已提交批次继续，批次内失败不会产生重复记录。
+- **可取消**：`PENDING`/`PROCESSING` 可取消；接口设置 `cancelRequested` 并尽力移除队列任务，执行中的任务在下一批边界停止并删除半成品，状态置 `CANCELLED`。`READY`/`FAILED`/`EXPIRED`/`CANCELLED` 返回 `EXPORT_NOT_CANCELLABLE`。
+- **幂等去重**：同一用户、格式、时间范围（规范化为 UTC 指纹）复用已有进行中任务或未过期成品（HTTP 200 且 `reused: true`），不生成对象副本；成品对象键即去重指纹。
+- **短期有效**：成品保留 `EXPORT_FILE_TTL_HOURS`（默认 24 小时），下载预签名地址有效期为 `PLAYBACK_URL_TTL_SECONDS`（默认 300 秒，`attachment` 下载）。到期后 Worker 扫描删除对象并置 `EXPIRED`；签发前也做即时过期判断。
+- **注销即失效**：账号注销会删除用户对象前缀，导出成品与检查点一并删除，所有已签发链接立即 404；数据库行随外键级联删除。
 
 ## 健康检查
 

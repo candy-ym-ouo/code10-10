@@ -66,3 +66,12 @@ export const goalStatusLabels = {
   MISSED: "已逾期",
   CANCELLED: "已取消",
 } as const;
+
+export const exportStatusLabels = {
+  PENDING: "排队中",
+  PROCESSING: "生成中",
+  READY: "可下载",
+  FAILED: "失败",
+  EXPIRED: "已过期",
+  CANCELLED: "已取消",
+} as const;

@@ -12,6 +12,9 @@ const envSchema = z.object({
   S3_FORCE_PATH_STYLE: z.string().optional().transform((value) => value == null || value.toLowerCase() === "true"),
   LOG_LEVEL: z.enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"]).default("info"),
   WORKER_CONCURRENCY: z.coerce.number().int().min(1).max(32).default(3),
+  EXPORT_BATCH_SIZE: z.coerce.number().int().min(1).max(500).default(50),
+  EXPORT_FILE_TTL_HOURS: z.coerce.number().int().min(1).max(168).default(24),
+  EXPORT_SWEEP_INTERVAL_MINUTES: z.coerce.number().int().min(1).max(1440).default(15),
 });
 
 let cached: z.infer<typeof envSchema> | undefined;

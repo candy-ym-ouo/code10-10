@@ -69,6 +69,24 @@ export async function createPlaybackUrl(objectKey: string, originalName: string,
   );
 }
 
+/**
+ * 导出文件下载地址：attachment 强制下载，签名 TTL 与播放地址一致（默认 300 秒）。
+ * 对象本身在 EXPORT_FILE_TTL_HOURS 后会被 Worker 删除，过期链接即使未失效也会 404。
+ */
+export async function createDownloadUrl(objectKey: string, fileName: string, contentType: string): Promise<string> {
+  const config = getConfig();
+  return getSignedUrl(
+    getPublicS3(),
+    new GetObjectCommand({
+      Bucket: config.S3_BUCKET,
+      Key: objectKey,
+      ResponseContentDisposition: `attachment; filename*=UTF-8''${encodeURIComponent(fileName)}`,
+      ResponseContentType: contentType,
+    }),
+    { expiresIn: config.PLAYBACK_URL_TTL_SECONDS },
+  );
+}
+
 export async function verifyObject(objectKey: string, expectedSize: bigint, expectedSha256: string): Promise<void> {
   const config = getConfig();
   let head;

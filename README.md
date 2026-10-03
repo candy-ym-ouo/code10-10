@@ -87,6 +87,9 @@ npm run test:e2e
 | `S3_ACCESS_KEY` / `S3_SECRET_KEY` | S3 凭证 | 通过 Secret 注入 |
 | `WEB_ORIGIN` | 允许的 Web 来源列表，逗号分隔 | `https://app.example.com` |
 | `PUBLIC_API_ORIGIN` | 对外 API 地址，用于 Cookie Secure 判断 | `https://api.example.com` |
+| `EXPORT_FILE_TTL_HOURS` | 导出成品保留小时数 | `24` |
+| `EXPORT_BATCH_SIZE` | Worker 每批读取的练习数量 | `50` |
+| `EXPORT_SWEEP_INTERVAL_MINUTES` | 过期导出扫描间隔（Worker） | `15` |
 
 完整变量见 [.env.example](./.env.example)。生产环境必须使用 HTTPS，设置真实的 `PUBLIC_API_ORIGIN`，并禁止在 `WEB_ORIGIN` 中使用通配符。
 
@@ -100,6 +103,9 @@ npm run test:e2e
 - Worker 禁止拼接 Shell 命令，统一使用参数数组调用 `ffprobe/ffmpeg`。
 - 所有资源查询都带 `userId` 条件，无法通过 ID 访问其他用户资源。
 - 删除练习进入后台清理队列，失败时保留 `DELETE_FAILED` 以便重试和审计。
+- 数据导出是异步分批任务：可在处理期间取消，Worker 崩溃或重试时按检查点断点续跑。
+- 相同格式与时间范围的导出复用进行中任务或未过期成品，不重复生成对象副本；成品默认保留 24 小时，下载地址 300 秒过期，到期由 Worker 扫描删除并置 `EXPIRED`。
+- 注销账号后用户对象前缀（音频、导出成品、检查点）与全部业务数据被后台清理，已签发链接立即失效。
 
 ## 项目文档
 

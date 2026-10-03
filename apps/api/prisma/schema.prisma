@@ -71,6 +71,7 @@ enum ExportStatus {
   READY
   FAILED
   EXPIRED
+  CANCELLED
 }
 
 enum GoalStatus {
@@ -279,18 +280,28 @@ model SessionReview {
 }
 
 model DataExport {
-  id         String        @id @default(uuid()) @db.Uuid
-  userId     String        @map("user_id") @db.Uuid
-  format     String        @db.VarChar(8)
-  status     ExportStatus  @default(PENDING)
-  objectKey  String?       @map("object_key") @db.Text
-  failure    String?       @db.VarChar(500)
-  expiresAt  DateTime?     @map("expires_at") @db.Timestamptz(6)
-  createdAt  DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt  DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
-  user       User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  id             String       @id @default(uuid()) @db.Uuid
+  userId         String       @map("user_id") @db.Uuid
+  format         String       @db.VarChar(8)
+  status         ExportStatus @default(PENDING)
+  objectKey      String?      @map("object_key") @db.Text
+  failure        String?      @db.VarChar(500)
+  dedupKey       String?      @map("dedup_key") @db.Char(64)
+  params         Json?
+  totalSessions  Int          @default(0) @map("total_sessions")
+  processedCount Int          @default(0) @map("processed_count")
+  cursorSession  String?      @map("cursor_session") @db.Uuid
+  checkpointKey  String?      @map("checkpoint_key") @db.Text
+  cancelRequested Boolean     @default(false) @map("cancel_requested")
+  startedAt      DateTime?    @map("started_at") @db.Timestamptz(6)
+  finishedAt     DateTime?    @map("finished_at") @db.Timestamptz(6)
+  expiresAt      DateTime?    @map("expires_at") @db.Timestamptz(6)
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime     @updatedAt @map("updated_at") @db.Timestamptz(6)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, createdAt(sort: Desc)])
+  @@index([status, expiresAt])
   @@map("data_exports")
 }
 

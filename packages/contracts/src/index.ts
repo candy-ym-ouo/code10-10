@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { z } from "zod";
 
 export const SESSION_STATUSES = [
@@ -201,6 +202,18 @@ export const createExportSchema = z.object({
   to: z.coerce.date().optional(),
 });
 
+export const EXPORT_STATUSES = ["PENDING", "PROCESSING", "READY", "FAILED", "EXPIRED", "CANCELLED"] as const;
+
+export const deleteAccountSchema = z
+  .object({
+    currentPassword: z.string().min(1).max(128),
+    confirmation: z.string().trim().min(1).max(40),
+  })
+  .refine((value) => value.confirmation === "DELETE-MY-ACCOUNT", {
+    path: ["confirmation"],
+    message: "请输入 DELETE-MY-ACCOUNT 以确认注销",
+  });
+
 export const idSchema = z.string().uuid();
 
 export type SessionStatus = (typeof SESSION_STATUSES)[number];
@@ -210,6 +223,7 @@ export type GoalCategory = (typeof GOAL_CATEGORIES)[number];
 export type MetricType = (typeof METRIC_TYPES)[number];
 export type GoalStatus = (typeof GOAL_STATUSES)[number];
 export type EvidenceRequirement = (typeof EVIDENCE_REQUIREMENTS)[number];
+export type ExportStatus = (typeof EXPORT_STATUSES)[number];
 
 export interface ApiErrorBody {
   error: {
@@ -279,4 +293,47 @@ export function describeMissingReview(input: {
     missing.push("已有未关闭目标时，本次至少记录一次目标进度");
   }
   return missing;
+}
+
+// ---- 数据导出领域规则 ----
+
+/**
+ * 导出参数的确定性指纹：同一用户、格式与时间范围得到相同结果。
+ * 规范化规则：日期统一转毫秒 UTC，空范围不参与哈希。
+ */
+export function exportParamsFingerprint(input: {
+  userId: string;
+  format: string;
+  from?: Date | string | null;
+  to?: Date | string | null;
+}): string {
+  const normalize = (value?: Date | string | null): number | null => {
+    if (value == null || value === "") return null;
+    const time = new Date(value).getTime();
+    return Number.isNaN(time) ? null : time;
+  };
+  const canonical = JSON.stringify({
+    u: input.userId,
+    f: input.format,
+    from: normalize(input.from),
+    to: normalize(input.to),
+  });
+  return createHash("sha256").update(canonical, "utf8").digest("hex");
+}
+
+/** 取消只允许在任务排队或处理阶段，READY/FAILED/EXPIRED/CANCELLED 均不可取消。 */
+export function isExportCancellable(status: ExportStatus): boolean {
+  return status === "PENDING" || status === "PROCESSING";
+}
+
+/** 可以直接复用、无需重新生成副本的任务状态。 */
+export function isExportReusable(status: ExportStatus, expiresAt?: Date | string | null): boolean {
+  if (status === "PROCESSING" || status === "PENDING") return true;
+  if (status === "READY") return expiresAt == null || new Date(expiresAt).getTime() > Date.now();
+  return false;
+}
+
+/** Worker 分批时的下一批查询游标，保证按稳定顺序断点续跑。 */
+export function nextBatchCursor(rows: Array<{ id: string }>): string | null {
+  return rows.length > 0 ? (rows.at(-1)?.id ?? null) : null;
 }

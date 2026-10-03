@@ -3,13 +3,14 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { pipeline } from "node:stream/promises";
-import { Worker } from "bullmq";
+import { Worker, type Job } from "bullmq";
 import { Redis } from "ioredis";
+import { deleteAccountData } from "./lib/account-deletion.js";
 import { getConfig } from "./config/env.js";
+import { cancelExportArtifacts, handleExportAttemptEnd, runExport, sweepExpiredExports } from "./lib/export-runner.js";
 import { prisma } from "./lib/prisma.js";
-import { deleteObject, getObjectStream, putObject } from "./lib/s3.js";
+import { deleteObject, getObjectStream } from "./lib/s3.js";
 import { generatePeaks, probeAudio } from "./lib/media.js";
-import { buildUserExport } from "./lib/export.js";
 
 const config = getConfig();
 const redis = new Redis(config.REDIS_URL, { maxRetriesPerRequest: null });
@@ -95,23 +96,6 @@ async function cleanupSession(sessionId: string) {
   }
 }
 
-async function exportData(exportId: string) {
-  const task = await prisma.dataExport.findUnique({ where: { id: exportId } });
-  if (!task || !task.objectKey) return;
-  await prisma.dataExport.update({ where: { id: exportId }, data: { status: "PROCESSING" } });
-  try {
-    const output = await buildUserExport(task.userId, task.format);
-    await putObject(task.objectKey, output.body, output.contentType);
-    await prisma.dataExport.update({ where: { id: exportId }, data: { status: "READY", failure: null } });
-  } catch (error) {
-    await prisma.dataExport.update({
-      where: { id: exportId },
-      data: { status: "FAILED", failure: error instanceof Error ? error.message.slice(0, 500) : "EXPORT_FAILED" },
-    });
-    throw error;
-  }
-}
-
 async function scanOverdueGoals() {
   const startOfToday = new Date();
   startOfToday.setUTCHours(0, 0, 0, 0);
@@ -127,15 +111,36 @@ async function scanOverdueGoals() {
 
 const worker = new Worker(
   "media-processing",
-  async (job) => {
+  async (job: Job) => {
     if (job.name === "probe-media") return processMedia(String(job.data.mediaId));
     if (job.name === "cleanup-session") return cleanupSession(String(job.data.sessionId));
-    if (job.name === "export-data") return exportData(String(job.data.exportId));
+    if (job.name === "export-data") {
+      const exportId = String(job.data.exportId);
+      try {
+        await runExport(exportId, log);
+      } catch (error) {
+        const willRetry = job.attemptsMade + 1 < (job.opts.attempts ?? 1);
+        await handleExportAttemptEnd(
+          exportId,
+          willRetry,
+          error instanceof Error ? error : new Error("EXPORT_FAILED"),
+        );
+        throw error;
+      }
+      return;
+    }
+    if (job.name === "delete-account") return deleteAccountData(String(job.data.userId), log);
     throw new Error(`Unknown job: ${job.name}`);
   },
   { connection: redis, concurrency: config.WORKER_CONCURRENCY },
 );
 
+worker.on("completed", async (job) => {
+  // 排队期间被用户取消的导出，remove() 失败而走到执行器时已在内部处理 CANCELLED
+  if (job.name === "export-data") {
+    await cancelExportArtifacts(String(job.data.exportId)).catch(() => undefined);
+  }
+});
 worker.on("failed", (job, error) => log("error", { jobId: job?.id, jobName: job?.name, err: error.message }, "job failed"));
 worker.on("error", (error) => log("error", { err: error.message }, "worker error"));
 
@@ -148,10 +153,19 @@ const overdueInterval = setInterval(() => {
   void scanOverdueGoals().catch((error) => log("error", { err: error instanceof Error ? error.message : String(error) }, "overdue scan failed"));
 }, 24 * 60 * 60_000);
 
+// 定期回收过期导出对象并将状态置 EXPIRED，保证短期下载承诺
+const runSweep = () =>
+  sweepExpiredExports(log).catch((error) =>
+    log("error", { err: error instanceof Error ? error.message : String(error) }, "export sweep failed"),
+  );
+await runSweep();
+const exportSweepInterval = setInterval(() => void runSweep(), config.EXPORT_SWEEP_INTERVAL_MINUTES * 60_000);
+
 async function shutdown(signal: string) {
   log("info", { signal }, "shutting down worker");
   clearInterval(heartbeat);
   clearInterval(overdueInterval);
+  clearInterval(exportSweepInterval);
   await worker.close();
   await redis.quit();
   await prisma.$disconnect();

@@ -40,6 +40,7 @@ export async function enqueueCleanup(sessionId: string): Promise<void> {
 }
 
 export async function enqueueExport(exportId: string): Promise<void> {
+  // 同一任务 ID 复用 BullMQ job：用户在取消/失败后重新发起会创建新的导出行与新 ID
   await getMediaQueue().add(
     "export-data",
     { exportId },
@@ -47,6 +48,20 @@ export async function enqueueExport(exportId: string): Promise<void> {
       jobId: `export:${exportId}`,
       attempts: 3,
       backoff: { type: "exponential", delay: 3000 },
+      removeOnComplete: 100,
+      removeOnFail: 500,
+    },
+  );
+}
+
+export async function enqueueAccountDeletion(userId: string): Promise<void> {
+  await getMediaQueue().add(
+    "delete-account",
+    { userId },
+    {
+      jobId: `delete-account:${userId}`,
+      attempts: 5,
+      backoff: { type: "exponential", delay: 10_000 },
       removeOnComplete: 100,
       removeOnFail: 500,
     },

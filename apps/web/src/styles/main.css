@@ -103,9 +103,9 @@ input:disabled, button:disabled { opacity: .55; cursor: not-allowed; }
 .badge { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border-radius: 999px; font-size: .78rem; font-weight: 750; background: #e7ece9; color: #3f4b47; }
 .badge.COMPLETED, .badge.READY, .badge.ACHIEVED { background: #dff1e8; color: #24644a; }
 .badge.IN_REVIEW, .badge.PROCESSING, .badge.IN_PROGRESS { background: #e2edf8; color: #275d8d; }
-.badge.DRAFT, .badge.PENDING_UPLOAD, .badge.OPEN { background: #ebe8e2; color: #655b4b; }
+.badge.DRAFT, .badge.PENDING_UPLOAD, .badge.OPEN, .badge.PENDING { background: #ebe8e2; color: #655b4b; }
 .badge.FAILED, .badge.DELETE_FAILED, .badge.MISSED { background: #f8e5e1; color: #93372d; }
-.badge.ARCHIVED, .badge.CANCELLED { background: #ece7f1; color: #634b78; }
+.badge.ARCHIVED, .badge.CANCELLED, .badge.EXPIRED { background: #ece7f1; color: #634b78; }
 .badge.RHYTHM { background: #faead9; color: #9a5715; }
 .badge.FINGERING { background: #e2edf8; color: #2d659b; }
 .badge.EMOTION { background: #eee7f5; color: #68458c; }
